@@ -1,0 +1,697 @@
+---
+title: "Hugging"
+output:
+  html_document: default
+  pdf_document: default
+date: "2023-07-06"
+---
+
+```{r setup, include=FALSE, echo=FALSE}
+# Global chunk options
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+```{r libraries, echo=FALSE}
+library(writexl)
+library(car)
+library(sjPlot)
+library(ggplot2)
+library(dplyr)
+library(RColorBrewer)
+library(rstatix)
+library(viridisLite)
+library(tidyverse)
+library(ggpubr)
+library(rstatix)
+library(broom)
+library(effsize)
+library(pwr)
+```
+
+```{r clean-up, echo=FALSE}
+#Load data
+##setwd("/Users/kiravonkleist/Documents/GitHub/Hugging_Paper")
+df = read.csv("Hugging.paper.csv")
+
+df <- df[, 1:which(names(df) == 'Was.this.run.valid.')]
+
+df <- subset(df, select = -c(Timestamp, Height.of.Hugger,Height.of.Hugger..in.inches.,Ethnicity.of.Hugger,X.Subject,Have.you.spoken.to.the.person.you.just.talked.to.before., Gender.Coded,COMMENT.BOX, Did.you.turn.down.participation.because.of.the.hug.request.,Height..hugee.,Height..in.Inches...hugee.,Have.you.seen.the.person.you.just.talked.to.on.campus.before., Have.you.been.in.this.study.before.))
+
+df <- df %>%
+  rename(Participant = Subject.Identifier, Confederate = Your.Initial, Gender.Hugger = Gender.of.Hugger, Hug.Length = Hug.Length..1..short..5..long, Hug.Pat = Hug.Pat..1..no.pat..5...pat, Participate = X.Are.you.willing.to.participate.in.a.study.about.touch.., Willingness.Hug = X.May.I.give.you.a.hug.., Like.Hug = How.did.you.like.this.hug., Number.Hug.Friends = How.often.do.you.like.to.hug.your.friends.when.you.meet.them., Like.lenght.hug = When.you.hug.your.friends.do.you.like.short.or.long.hugs., Like.pat = Do.you.like.to.be.patted.when.a.friend.hugs.you., Family.Hugs =  Growing.up..how.common.was.affectionate.touch.with.your.family.overall., Gender = Gender, Lean.Hug = How.much.did.the.subject..lean.into..the.hug., Time = Time.in.Seconds, Suspicion =Was.the.subject.suspicious.about.the.pictures., Number.pictures = How.many.pictures.did.the.subject.look.at., Length.Pictures = How.long.did.the.subject.look.at.the.pictures., Interest = How.much.did.the.subject.ask.about.the.pictures.)
+```
+
+
+
+```{r, Filter out confederates, echo=FALSE, include=FALSE}
+
+# remove the confederates that were not part of the study and only have one entry 
+
+df <- df[df$Participant != "Subject.341", ]
+df <- df[df$Participant != "Subject.224", ]
+df <- df[df$Participant != "Subject.235", ]
+
+```
+
+
+```{r initial sample, echo=FALSE}
+
+# Rename the written names, so that they are the same
+df$Confederate <- trimws(df$Confederate)
+df$Confederate <- recode(df$Confederate, 
+                         "ac" = "AC", 
+                         "FC " = "FC")
+
+# Display total remaining participants
+cat("# Our intial total sample of n \n")
+
+total_participants <- nrow(df)
+total_participants
+```
+
+# Cleaning 
+## Filter out Participants who said "no" to being in the study
+
+```{r, filter participants, echo=FALSE,}
+#Filter out everyone that said no to being in the study
+cat("# We filter out everybody that said *no* to participating in the study. This leaves us at\n")
+
+df <- df %>%
+  mutate(Participate = ifelse(
+    Participate == "No [if, they heard me & stopped]",
+    "No",
+    Participate
+  ))
+
+df <- df %>% 
+  filter(Participate != "No") 
+
+total_participants <- nrow(df)
+total_participants 
+```
+## Filter out participants who said "no" to the Hug
+
+```{r, echo=FALSE}
+df <- df %>%
+  mutate(Willingness.Hug = ifelse(Willingness.Hug == "No [Questionnaire for subject]", "No", Willingness.Hug))
+
+No_count <- df %>%
+  filter(Willingness.Hug == "No") %>%
+  tally()
+
+print(No_count)
+
+cat("# Filter out all the participants that were not willing to hug, which leaves us at.\n")
+
+df <- df %>% 
+  filter(Willingness.Hug != "No") 
+
+total_participants <- nrow(df)
+total_participants 
+
+cat("# Because we are using gender in one of the analysis, we had to filter \n")
+cat("# out participants that were non-binary n= 1.\n")
+
+df<- df %>%
+  filter(Gender != "Transmaculine")
+
+nrow(df)
+
+cat("# Table of Participant Gender")
+
+table(df$Gender)
+table(df$Gender.Hugger)
+
+df$Age = as.numeric(df$Age)
+
+mean(df$Age)
+sd(df$Age)
+
+
+```
+
+## Hypothesis 1.
+
+
+### Creating the dataframe df_filtered
+
+Here we filter out all participants who didn't look at the pictures to create a variable called social interest
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Filter out rows where Number.pictures == 0
+df_filtered <- df %>%
+  filter(Number.pictures != 0)
+
+cat("# Filter out all the participants that were not willing to hug, which leaves us at.\n")
+nrow(df_filtered)
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Ensure variables are numeric
+df_filtered <- df_filtered %>%
+  mutate(
+    Time = as.numeric(Time),
+    Number.pictures = as.numeric(Number.pictures)
+  )
+
+#Here is the raw mean and sd of Time and Pictures
+cat("# mean Time looked at pictures")
+mean(df_filtered$Time)
+cat("# sd time looked at pictures")
+sd(df_filtered$Time)
+cat("# mean number pictures looked at")
+mean(df_filtered$Number.pictures)
+cat("# sd number pictures looked at")
+sd(df_filtered$Number.pictures)
+
+```
+
+# Should we log transform our data?
+
+Now we are looking at histograms, we should log transform the data if the data are not normally distributed
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Histograms
+hist(df_filtered$Time, main = "Raw Time", breaks = 30)
+hist(df_filtered$Number.pictures, main = "Raw Number of Pictures", breaks = 30)
+
+# Shapiro-Wilk tests for normality
+shapiro.test(df_filtered$Time)
+shapiro.test(df_filtered$Number.pictures)
+
+cat("# Both the Shapiro tests are significant, also the histograms show that the data is skewed to the right, which means we could log transform")
+```
+```{r mean of Number pictures and time looked at pictures, echo=FALSE}
+df_filtered %>%
+  group_by(Condition) %>%
+  summarise(
+    Median_Number_Pictures = median(Number.pictures, na.rm = TRUE),
+    Median_Time = median(Time, na.rm = TRUE),
+    n = n()
+  )
+```
+
+
+
+Log Transform the data
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_filtered$Time.log <- log(df_filtered$Time)
+df_filtered$Number.pictures.log <- log(df_filtered$Number.pictures)
+```
+
+Now, check again for Normality
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+# Histograms
+hist(df_filtered$Time.log, main = "Raw Time", breaks = 30)
+hist(df_filtered$Number.pictures.log, main = "Raw Number of Pictures", breaks = 30)
+
+```
+
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df_filtered$Number.pictures.z = scale(df_filtered$Number.pictures.log)
+df_filtered$Time.z = scale(df_filtered$Time.log)
+
+cat("# Correlation between z-scored number of pictures looked at and time spend looking at pictures")
+
+cor(df_filtered$Number.pictures.z, df_filtered$Time.z)
+cor.test(df_filtered$Number.pictures.z, df_filtered$Time.z, method = "pearson")
+
+
+df_filtered$Objective.Interest <- (df_filtered$Number.pictures.z + df_filtered$Time.z)/ 2
+
+cat("# mean Social Interest")
+mean(df_filtered$Objective.Interest)
+cat("# sd Social Interest")
+sd(df_filtered$Objective.Interest)
+```
+
+```{r participants for social interest, echo=FALSE}
+cat("# Participants used for the Social Interest Analysis")
+nrow(df_filtered$Objective.Interest)
+```
+
+
+## Is there a significant difference between Conditions 1 (no touch) and 2 (handshake)?
+
+
+```{r t test conditions 1 and 2, echo=FALSE}
+df_no_touch <- df_filtered %>%
+  filter(Condition %in% c(1, 2))
+
+df_no_touch$Condition = as.factor(df_no_touch$Condition)
+
+
+m1 = t.test(Objective.Interest ~ Condition, df_no_touch)
+
+m1
+
+cohen.d(Objective.Interest ~ Condition, df_no_touch)
+```
+Yes, the there is no significant difference between the two conditions
+
+# Is there a significant difference between the four hug conditions?
+
+```{r  t test conditions 3,4,5,6, echo=FALSE}
+df_touch <- df_filtered %>%
+  filter(Condition %in% c(3,4,5,6))
+
+
+df_touch$Condition = as.factor(df_touch$Condition)
+
+cat("# Social Interest ~ Hug vs. No Hug Condition")
+
+m1 = aov(Objective.Interest ~ Condition, df_touch)
+
+summary(m1)
+
+eta_squared(m1)
+
+cat("# Hug Liking ~ Hug vs. No Hug Condition")
+
+m2 = aov(Like.Hug ~ Condition, df_touch)
+
+summary(m2)
+
+eta_squared(m2)
+
+```
+There is also no significant difference between the four Hug conditions
+
+```{r create hug vs. no hug conditions, echo=FALSE}
+df_filtered$Condition <- ifelse(df_filtered$Condition %in% c("1", "2"), "No Hug", df_filtered$Condition)
+
+df_filtered$Condition <- ifelse(df_filtered$Condition %in% c("3", "4", "5", "6"), "Hug", df_filtered$Condition)
+
+df_filtered$Condition <- as.factor(df_filtered$Condition)
+
+df_filtered$Condition <- relevel(df_filtered$Condition, ref = "No Hug")
+
+table(df_filtered$Condition)
+```
+
+```{r median social interest hug vs. no hug, echo=FALSE}
+df_filtered %>%
+  group_by(Condition) %>%
+  summarise(
+    Median_Number_Pictures = median(Number.pictures, na.rm = TRUE),
+    Median_Time = median(Time, na.rm = TRUE),
+    n = n()
+  )
+```
+## Conducting a t-test for our main Hypothesis 1
+```{r t.test main analysis, echo=FALSE}
+t.test(Objective.Interest ~ Condition, data = df_filtered)
+
+
+effsize_t <- cohen.d(Objective.Interest ~ Condition, data = df_filtered)
+
+print(effsize_t)
+```
+
+## Ethnicity as a Covariate
+
+The reference group for this condition is Asia\
+
+```{r, echo=FALSE,message=FALSE}
+df_filtered$Ethnicity.Fixed <- as.factor(df_filtered$Ethnicity.Fixed)
+
+df_filtered$Ethnicity.Fixed <- relevel(df_filtered$Ethnicity.Fixed, ref = "Asian")
+
+
+m1 = aov(Objective.Interest ~ Ethnicity.Fixed, data = df_filtered)
+
+summary(m1)
+
+#for effect size:
+
+m1 = lm(Objective.Interest ~ Ethnicity.Fixed, data = df_filtered)
+
+summary(m1)
+```
+
+## 1.1 Main Model prediction differences in condition on social interest
+
+```{r main model with ethnicity, echo = FALSE}
+
+m1 = lm(Objective.Interest ~ Condition + Ethnicity.Fixed, df_filtered, type=2)
+
+summary(m1)
+
+library(apaTables)
+
+apa.reg.table(m1, 
+              filename = "Main_model_apa.doc",
+              table.number = 1)
+
+table(df$Ethnicity.Fixed)
+```
+
+
+
+
+## 1.1 How many participants said "Yes" to looking at the pictures?
+
+```{r agreeing to look at picutes, echo=FALSE}
+df$Condition <- ifelse(df$Condition %in% c("1", "2"), "No Hug", df$Condition)
+
+df$Condition <- ifelse(df$Condition %in% c("3", "4", "5", "6"), "Hug", df$Condition)
+
+df$Condition <- as.factor(df$Condition)
+
+df$Condition <- relevel(df$Condition, ref = "No Hug")
+
+cat("# Condition count for all 330 participants agreeing to participate")
+
+table(df$Condition)
+```
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+df$Number.pictures.binary <- ifelse(df$Number.pictures >= 1, 1, 0)
+
+
+df$Number.pictures.binary <- ifelse(df$Number.pictures.binary == 1, "yes", "no")
+
+ggplot(df, aes(x = Condition, fill = as.factor(Number.pictures.binary))) +
+  geom_bar(position = "dodge") +
+  labs(title = "Participants saying yes to seeing the pictures",
+       x = "Condition",
+       y = "Count",
+       fill = "agree to seeing the pictures") +
+  scale_fill_manual(values = c("no" = "blue", "yes" = "purple")) +
+  theme_minimal()
+
+cat("# Number and Percentage of participants agreeing to see the pictures based on condition")
+
+# Calculate percentages
+df_summary <- df %>%
+  group_by(Condition, Number.pictures.binary) %>%
+  summarise(count = n()) %>%
+  group_by(Condition) %>%
+  mutate(percentage = (count / sum(count)) * 100)
+
+# View summary
+print(df_summary)
+
+```
+
+Is there a statistical difference between how many people agreed to see the pictures based on condition? We conduct a logistic regression.
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+df$Number.pictures.binary <- factor(df$Number.pictures.binary, levels = c("no", "yes"))
+
+# Logistic regression model
+logit_model <- glm(Number.pictures.binary ~ Condition, data = df, family = binomial(link = "logit"))
+
+# Summary of the model
+summary(logit_model)
+
+#Calculate the odd's ratio
+
+
+library(effectsize)
+
+effectsizes <- standardize_parameters(logit_model, exp=TRUE)
+
+effectsizes
+```
+
+# Does Hug Liking predict social Interest?
+## Creating a dataframe with only the Hug Condition (and people who agreed to seeing the pictures)
+
+```{r create only hug condition, echo=FALSE}
+df_hug <- df_filtered %>% filter(Condition != "No Hug")
+
+nrow(df_hug)
+```
+
+```{r logisitc regression Hug Liking, echo=FALSE}
+library(QuantPsyc)
+m3 = lm(Objective.Interest ~ Like.Hug, df_hug)
+
+summary(m3)
+
+b <- coef(m3)["Like.Hug"]
+# Get SD of predictor and outcome
+sd_x <- sd(df_hug$Like.Hug, na.rm = TRUE)
+sd_y <- sd(df_hug$Objective.Interest, na.rm = TRUE)
+
+# Manually compute standardized beta
+beta_manual <- b * (sd_x / sd_y)
+print(paste("Manual standardized beta:", round(beta_manual, 4)))
+
+lm.beta(m3)  
+
+apa.reg.table(m3, filename = "Like_hug_regression_table.doc")
+```
+## Question 3. Is there a different Gender effect?
+
+### Female Participants
+
+```{r female participants, echo=FALSE}
+df_female <- df_hug %>% filter(Gender != "Male")
+
+table(df_female$Gender.Hugger)
+
+mean(df_female$Objective.Interest)
+sd(df_female$Objective.Interest)
+
+
+t.test(Objective.Interest ~ Gender.Hugger, data = df_female)
+
+
+effsize <- cohen.d(Objective.Interest ~ Gender.Hugger, data = df_female)
+
+print(effsize)
+```
+### Male Participants
+
+```{r male participants, echo=FALSE}
+df_male <- df_hug %>% filter(Gender != "Female")
+
+table(df_male$Gender.Hugger)
+
+t.test(Objective.Interest ~ Gender.Hugger, data = df_male)
+
+effsize <- cohen.d(Objective.Interest ~ Gender.Hugger, data = df_male)
+
+print(effsize)
+```
+
+
+
+
+# Descriptive Statistics of Ethnicity
+
+
+```{r, echo=FALSE, warning=FALSE}
+
+## Ethnicity
+# There were some differences in how RAs spelled out the Ethnicity, but luckily someone else already fixed it. So we are using Ethnicity.Fixed here
+
+#Other is if someone reported two or more ethnicities (in paper called Mixed)
+
+table(df$Ethnicity.Fixed)
+
+ggplot(df, aes(x = Condition, fill = Ethnicity.Fixed)) +
+  geom_bar() +  # Automatically counts the frequencies
+  scale_fill_manual(values = c(
+    "Caucasian" = "#4B0082",    # Dark Purple
+    "Asian" = "#00008B",        # Dark Blue
+    "African American" = "#8A2BE2",  # Light Purple
+    "Hispanic" = "#4682B4",     # Steel Blue
+    "Other" = "#FF7F50"         # Coral
+  )) +
+  labs(x = "Condition", y = "Count", fill = "Ethnicity") +
+  ggtitle("Ethnicity Distribution Across Conditions") +
+  theme_minimal()
+
+# We need to see whether Ethnicity is equally distributed across Conditions
+
+ethnicity_condition_table <- table(df$Ethnicity.Fixed, df$Condition)
+print(ethnicity_condition_table)
+
+```
+
+### Distribution of Gender
+
+How many participants are in the Hug Condition and how many are in the No Hug condition based on Gender (for Social Interest)?
+
+```{r, echo=FALSE, warning=FALSE}
+gender_condition_table <- table(df$Condition, df$Gender)
+
+print(gender_condition_table)
+```
+
+Graph showing the distribution of gender in the two conditions
+
+```{r, echo=FALSE, warning=FALSE}
+
+ggplot(df, aes(x = Condition, fill = Gender)) +
+  geom_bar(position = "dodge") +  # Places the bars side by side
+  scale_fill_manual(values = c("Male" = "#4B0082", "Female" = "#0000FF")) +  # Correct the labels
+  labs(x = "Condition", y = "Count", fill = "Gender") +
+  ggtitle("Gender Distribution Across Conditions") +
+  theme_minimal()
+
+```
+
+```{r, echo=FALSE, warning=FALSE}
+cat("Total female n in no hug condition\n")
+
+43
+cat("percentage female in no hug condition\n")
+
+43/(43+70)
+cat("Total female n in hug condition\n")
+97
+cat("percentage female in hug condition\n")
+
+97/(97+112)
+```
+Is the distribution of female participants the same in both conditions?
+We are performing a chi-square test.
+```{r, echo=FALSE, warning=FALSE}
+
+# Perform the Chi-Square Test
+chi_square_test <- chisq.test(gender_condition_table)
+
+# Print the results
+chi_square_test
+
+```
+The percentage of female participants is not significantly different between conditions.
+
+### Gender of Confederate by Condition
+
+Is the Gender of the Confederate Variable evenly distributed across conditions (for Social Interest)?
+
+```{r, echo=FALSE, warning=FALSE}
+gender.hugger_condition_table <- table(df$Condition, df$Gender.Hugger)
+
+print(gender.hugger_condition_table)
+
+(62+134)/322
+(51+75)/322
+```
+
+
+Graph showing the distribution of gender of the Confederate across the two conditions
+
+```{r, echo=FALSE, warning=FALSE}
+
+ggplot(df, aes(x = Condition, fill = Gender.Hugger)) +
+  geom_bar(position = "dodge") +  # Places the bars side by side
+  scale_fill_manual(values = c("Male" = "#4B0082", "Female" = "#0000FF")) +  # Correct the labels
+  labs(x = "Condition", y = "Count", fill = "Confederate Gender") +
+  ggtitle("Confederate Gender Distribution Across Conditions") +
+  theme_minimal()
+
+```
+
+Is the distribution of female experimenters the same in both conditions?
+We are performing a chi-square test.
+```{r, echo=FALSE, warning=FALSE}
+
+# Perform the Chi-Square Test
+chi_square_test.confederate <- chisq.test(gender.hugger_condition_table)
+
+# Print the results
+chi_square_test.confederate
+
+```
+
+
+#### Demographics Overview Gender and Ethnicity
+
+```{r, echo=FALSE, message=FALSE, warning=FALSE}
+
+table(df$Gender)
+cat("Percentage Female Participants\n")
+ 
+(142)/(330)
+
+cat("Total numbers female participants\n")
+(142)
+
+cat("Percentage Male Participants\n")
+
+(188)/(330)
+
+cat("Total Numbers Male Participants\n")
+
+(188)
+
+
+table(df$Ethnicity.Fixed)
+
+cat("African American\n")
+
+(11/330)
+
+cat("Asian\n")
+
+(149/330)
+
+
+cat("Caucasian\n")
+(92/330)
+
+cat("Hispanic\n")
+(45/330)
+
+cat("Other\n")
+(33/330)
+
+table(df$Gender.Hugger)
+
+
+cat("percentage female hugger\n")
+(196/330)
+
+cat("percentage male hugger\n")
+(134/330)
+
+```
+# Ethnicity 
+
+Did Ethnicity differ between the two conditions
+```{r, echo=FALSE, warning=FALSE}
+
+## Ethnicity
+# There were some differences in how RAs spelled out the Ethnicity, but luckily someone else already fixed it. So we are using Ethnicity.Fixed here
+
+#Other is if someone reported two or more ethnicities
+
+table(df_filtered$Ethnicity.Fixed)
+
+ggplot(df_filtered, aes(x = Condition, fill = Ethnicity.Fixed)) +
+  geom_bar() +  # Automatically counts the frequencies
+  scale_fill_manual(values = c(
+    "Caucasian" = "#4B0082",    # Dark Purple
+    "Asian" = "#00008B",        # Dark Blue
+    "African American" = "#8A2BE2",  # Light Purple
+    "Hispanic" = "#4682B4",     # Steel Blue
+    "Other" = "#FF7F50"         # Coral
+  )) +
+  labs(x = "Condition", y = "Count", fill = "Ethnicity") +
+  ggtitle("Ethnicity Distribution Across Conditions") +
+  theme_minimal()
+
+#We need to see whether Ethnicity is equally distributed across Conditions
+
+ethnicity_condition_table <- table(df_filtered$Ethnicity.Fixed, df_filtered$Condition)
+print(ethnicity_condition_table)
+
+nrow(df_filtered)
+
+chi_square_result <- chisq.test(ethnicity_condition_table)
+
+
+print(chi_square_result)
+```
